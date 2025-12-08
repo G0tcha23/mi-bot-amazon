@@ -70,12 +70,14 @@ def agregar_marca_agua(url_imagen_producto):
         response = requests.get(url_imagen_producto, headers=get_headers(), timeout=10)
         img_producto = Image.open(BytesIO(response.content)).convert("RGBA")
         
-        # Logo de Rockstar Games (Wikimedia)
-        url_logo = "https://upload.wikimedia.org/wikipedia/commons/thumb/5/53/Rockstar_Games_Logo.svg/512px-Rockstar_Games_Logo.svg.png"
+        # LOGO ROCKSTAR - CAMBIA LA URL DE ABAJO POR LA TUYA SI TIENES UNA (Debe ser link directo a .png/.jpg)
+        url_logo = "https://upload.wikimedia.org/wikipedia/commons/thumb/e/ee/Rockstar_Toronto_Logo.svg/512px-Rockstar_Toronto_Logo.svg.png"
+        
         response_logo = requests.get(url_logo, headers=get_headers(), timeout=10)
         img_logo = Image.open(BytesIO(response_logo.content)).convert("RGBA")
         
-        ancho_base = int(img_producto.width * 0.25)
+        # Redimensionado al 12% (Pequeño y elegante)
+        ancho_base = int(img_producto.width * 0.12)
         w_percent = (ancho_base / float(img_logo.size[0]))
         h_size = int((float(img_logo.size[1]) * float(w_percent)))
         img_logo = img_logo.resize((ancho_base, h_size), Image.Resampling.LANCZOS)
@@ -242,20 +244,53 @@ async def finalizar_enlace(update, context, link):
     user_data_storage[uid]['enlace'] = link
     datos = user_data_storage[uid]
     
-    # 1. SEND TO USER
+    # 1. SEND LINK TO USER (AND ARCHIVE)
     msg_user = f"🔗 **Enlace Generado:**\n{link}"
     if update.callback_query:
         await update.callback_query.message.reply_text(msg_user)
     else:
         await update.message.reply_text(msg_user)
         
-    # 2. SEND TO ARCHIVE CHANNEL (LINKS)
     try:
         msg_archive = f"📦 **{datos['titulo']}**\n🔗 {link}"
         await context.bot.send_message(chat_id=ARCHIVO_ENLACES_ID, text=msg_archive)
     except Exception as e:
         logger.error(f"Error archivo enlaces: {e}")
         
+    # 2. GENERATE PREVIEW (ALWAYS)
+    status_msg = await context.bot.send_message(chat_id=update.effective_chat.id, text="🎨 Generando Vista Previa con Logo...")
+    
+    titulo = datos['titulo']
+    if len(titulo) > 800: titulo = titulo[:800] + "..."
+    
+    msg_card = (
+        f"**{titulo}**\n"
+        "__________________\n\n"
+        f"**{datos['review']}**\n"
+        f"**{datos['oferta']}**\n"
+        "__________________\n\n"
+        "**Contacto:** @R0cksta"
+    )
+    
+    img_data = None
+    if datos['imagen_url']:
+        img_data = agregar_marca_agua(datos['imagen_url'])
+        
+    # Send Preview
+    try:
+        await status_msg.delete()
+        if img_data:
+            img_data.seek(0)
+            await context.bot.send_photo(chat_id=update.effective_chat.id, photo=img_data, caption=msg_card, parse_mode='Markdown')
+        elif datos['imagen_url']:
+             await context.bot.send_photo(chat_id=update.effective_chat.id, photo=datos['imagen_url'], caption=msg_card, parse_mode='Markdown')
+        else:
+             await context.bot.send_message(chat_id=update.effective_chat.id, text=msg_card, parse_mode='Markdown')
+    except Exception as e:
+        logger.error(f"Error enviando preview: {e}")
+        await context.bot.send_message(chat_id=update.effective_chat.id, text="⚠️ Error generando vista previa de imagen, pero la publicación funciona.")
+
+    # 3. ASK GROUPS
     return await preguntar_grupos(update, context)
 
 async def preguntar_grupos(update, context):
@@ -265,8 +300,8 @@ async def preguntar_grupos(update, context):
     keyboard.append([InlineKeyboardButton("✅ TODOS", callback_data="g_todos")])
     keyboard.append([InlineKeyboardButton("❌ Cancelar", callback_data="cancel")])
     
-    target = update.message if update.message else update.callback_query.message
-    await target.reply_text("📢 **¿Dónde publicar?**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+    # We send a new message because the previous one was the photo preview
+    await context.bot.send_message(chat_id=update.effective_chat.id, text="📢 **¿Dónde publicar?**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
     return SELECCIONANDO_GRUPOS
 
 async def publicar(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -303,7 +338,7 @@ async def publicar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     
     # IMAGE PROCESSING
-    await query.message.edit_text("🎨 Procesando imagen y enviando...")
+    await query.message.edit_text("🚀 Publicando...")
     
     img_data = None
     if datos['imagen_url']:
@@ -320,7 +355,6 @@ async def publicar(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 await context.bot.send_message(chat_id=chat_id, text=msg, parse_mode='Markdown')
             
-            # Don't count archive channel for user report
             if chat_id != ARCHIVO_PRODUCTOS_ID: count += 1
         except Exception as e:
             logger.error(f"Error enviando a {chat_id}: {e}")
