@@ -70,31 +70,41 @@ def agregar_marca_agua(url_imagen_producto):
         response = requests.get(url_imagen_producto, headers=get_headers(), timeout=10)
         img_producto = Image.open(BytesIO(response.content)).convert("RGBA")
         
-        # LOGO ROCKSTAR - CAMBIA LA URL DE ABAJO POR LA TUYA SI TIENES UNA (Debe ser link directo a .png/.jpg)
-        url_logo = "https://upload.wikimedia.org/wikipedia/commons/thumb/e/ee/Rockstar_Toronto_Logo.svg/512px-Rockstar_Toronto_Logo.svg.png"
+        # LOGO ROCKSTAR OFICIAL (AMARILLO/NEGRO) - FUENTE FIABLE DE WIKIPEDIA
+        url_logo = "https://upload.wikimedia.org/wikipedia/commons/thumb/5/53/Rockstar_Games_Logo.svg/512px-Rockstar_Games_Logo.svg.png"
         
-        response_logo = requests.get(url_logo, headers=get_headers(), timeout=10)
-        img_logo = Image.open(BytesIO(response_logo.content)).convert("RGBA")
-        
-        # Redimensionado al 12% (Pequeño y elegante)
-        ancho_base = int(img_producto.width * 0.12)
-        w_percent = (ancho_base / float(img_logo.size[0]))
-        h_size = int((float(img_logo.size[1]) * float(w_percent)))
-        img_logo = img_logo.resize((ancho_base, h_size), Image.Resampling.LANCZOS)
-        
-        position = (20, 20)
-        temp_img = Image.new('RGBA', img_producto.size, (0,0,0,0))
-        temp_img.paste(img_producto, (0,0))
-        temp_img.paste(img_logo, position, mask=img_logo)
-        
-        output = BytesIO()
-        bg = Image.new("RGB", temp_img.size, (255, 255, 255))
-        bg.paste(temp_img, mask=temp_img.split()[3])
-        bg.save(output, format="JPEG", quality=95)
-        output.seek(0)
-        return output
+        try:
+            response_logo = requests.get(url_logo, headers=get_headers(), timeout=10)
+            img_logo = Image.open(BytesIO(response_logo.content)).convert("RGBA")
+            
+            # Redimensionado al 12% del ancho de la imagen (Pequeño y elegante)
+            ancho_base = int(img_producto.width * 0.12)
+            w_percent = (ancho_base / float(img_logo.size[0]))
+            h_size = int((float(img_logo.size[1]) * float(w_percent)))
+            img_logo = img_logo.resize((ancho_base, h_size), Image.Resampling.LANCZOS)
+            
+            position = (20, 20)
+            temp_img = Image.new('RGBA', img_producto.size, (0,0,0,0))
+            temp_img.paste(img_producto, (0,0))
+            temp_img.paste(img_logo, position, mask=img_logo)
+            
+            output = BytesIO()
+            bg = Image.new("RGB", temp_img.size, (255, 255, 255))
+            bg.paste(temp_img, mask=temp_img.split()[3])
+            bg.save(output, format="JPEG", quality=95)
+            output.seek(0)
+            return output
+        except Exception as e:
+            logger.error(f"Error descargando logo: {e}")
+            # Si falla el logo, devolvemos la imagen original para no parar el bot
+            output = BytesIO()
+            img_producto = img_producto.convert("RGB")
+            img_producto.save(output, format="JPEG", quality=95)
+            output.seek(0)
+            return output
+            
     except Exception as e:
-        logger.error(f"Error imagen: {e}")
+        logger.error(f"Error imagen producto: {e}")
         return None
 
 # Amazon Scraper
