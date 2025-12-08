@@ -10,7 +10,6 @@ import os
 import threading
 import http.server
 import socketserver
-import os
 
 # Configuración de logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -22,7 +21,8 @@ TOKEN = "5542545245:AAETXpqyI9htrp760FqZ1TmI7N0A4zKhY1I"
 # Configuración de Grupos
 GRUPOS_CONFIG = {
     -1001593262082: "Rockstar Store",
-    -1001521082473: "Rockstar Spain"
+    -1001521082473: "Rockstar Spain",
+    -1001461104385: "Spain Game"
 }
 
 # Estados de la conversación
@@ -31,7 +31,6 @@ ESPERANDO_ASIN, ESPERANDO_TIPO_ENLACE, ESPERANDO_KEYWORD, SELECCIONANDO_GRUPOS, 
 # Datos temporales del usuario
 user_data_storage = {}
 
-
 # Lista rotativa de User-Agents para evitar bloqueos
 USER_AGENTS = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -39,7 +38,6 @@ USER_AGENTS = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0',
     'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
 ]
-import random
 
 def get_headers():
     return {
@@ -48,8 +46,6 @@ def get_headers():
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
         'Referer': 'https://www.amazon.es/'
     }
-
-
 
 # --- SERVIDOR WEB DUMMY PARA RENDER ---
 def run_dummy_server():
@@ -73,8 +69,6 @@ def start_server_thread():
     thread = threading.Thread(target=run_dummy_server)
     thread.daemon = True
     thread.start()
-
-
 
 # --- SISTEMA DE HISTORIAL ---
 HISTORY_FILE = 'historial.json'
@@ -156,8 +150,6 @@ async def seleccionar_historial(update: Update, context: ContextTypes.DEFAULT_TY
     
     # Mostrar el producto y pedir oferta (saltamos a mostrar producto)
     return await mostrar_producto_encontrado(update, context, datos, is_callback=True)
-
-
 
 def obtener_datos_amazon(asin_raw):
     """Obtiene datos del producto de Amazon usando el ASIN con reintentos y soporte extendido"""
@@ -241,7 +233,6 @@ def obtener_datos_amazon(asin_raw):
                 
     return None
 
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Inicia la conversación"""
     await update.message.reply_text(
@@ -281,12 +272,14 @@ async def mostrar_producto_encontrado(update, context, datos, is_callback=False)
     keyboard = [
         [InlineKeyboardButton("💰 Reembolso Completo", callback_data="oferta_completo")],
         [InlineKeyboardButton("💵 Reembolso Parcial", callback_data="oferta_parcial")],
+        [InlineKeyboardButton("1️⃣ Rango Precio 1", callback_data="oferta_rango_1")],
+        [InlineKeyboardButton("2️⃣ Rango Precio 2", callback_data="oferta_rango_2")],
+        [InlineKeyboardButton("3️⃣ Rango Precio 3", callback_data="oferta_rango_3")],
         [InlineKeyboardButton("📋 Consultar Condiciones", callback_data="oferta_consultar")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     # --- CORTE DE SEGURIDAD PARA EVITAR ERROR DE TELEGRAM (Max 1024 chars) ---
-    # Solo se aplica a la vista previa, no afecta a la publicación final si los datos son correctos.
     titulo_safe = datos['titulo']
     if len(titulo_safe) > 300:
         titulo_safe = titulo_safe[:300] + "..."
@@ -325,8 +318,15 @@ async def seleccionar_oferta(update: Update, context: ContextTypes.DEFAULT_TYPE)
         user_data_storage[user_id]['tipo_oferta'] = tipo
         
         # Feedback visual simple
-        ofertas = {"completo": "Reembolso Completo", "parcial": "Reembolso Parcial", "consultar": "Consultar Condiciones"}
-        await query.message.reply_text(f"✅ Seleccionado: {ofertas.get(tipo)}")
+        ofertas = {
+            "completo": "Reembolso Completo",
+            "parcial": "Reembolso Parcial",
+            "consultar": "Consultar Condiciones",
+            "rango_1": "Rango Precio 1",
+            "rango_2": "Rango Precio 2",
+            "rango_3": "Rango Precio 3"
+        }
+        await query.message.reply_text(f"✅ Seleccionado: {ofertas.get(tipo, tipo)}")
 
     # Botones enlace
     keyboard = [
@@ -346,7 +346,8 @@ async def seleccionar_tipo_enlace(update: Update, context: ContextTypes.DEFAULT_
         enlace = f"https://www.amazon.es/dp/{asin}?linkCode=sl1&tag=martaadd-21"
         user_data_storage[user_id]['enlace'] = enlace
         
-        await query.message.reply_text(f"🔗 **Enlace:**\n`{enlace}`", parse_mode='Markdown')
+        # IMPORTANTE: Enlace sin formato código para que sea clicable y genere preview
+        await query.message.reply_text(f"🔗 **Enlace:**\n{enlace}", parse_mode='Markdown')
         return await preguntar_grupos(update, context)
         
     elif query.data == "enlace_keywords":
@@ -361,7 +362,7 @@ async def recibir_keyword(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id in user_data_storage:
         user_data_storage[user_id]['enlace'] = enlace
         
-    await update.message.reply_text(f"🔗 **Enlace Keyword:**\n`{enlace}`", parse_mode='Markdown')
+    await update.message.reply_text(f"🔗 **Enlace Keyword:**\n{enlace}", parse_mode='Markdown')
     return await preguntar_grupos(update, context)
 
 async def preguntar_grupos(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -399,7 +400,10 @@ async def publicar_en_grupos(update: Update, context: ContextTypes.DEFAULT_TYPE)
     oferta_map = {
         "completo": "💰 Reembolso Completo",
         "parcial": "💵 Reembolso Parcial",
-        "consultar": "📋 Consultar Condiciones"
+        "consultar": "📋 Consultar Condiciones",
+        "rango_1": "1️⃣ Rango Precio 1",
+        "rango_2": "2️⃣ Rango Precio 2",
+        "rango_3": "3️⃣ Rango Precio 3"
     }
     texto_oferta = oferta_map.get(datos.get('tipo_oferta'), "📋 Consultar Condiciones")
     
@@ -493,9 +497,10 @@ def main():
     application.add_handler(conv_handler)
     application.add_handler(CommandHandler('grupoid', obtener_id_grupo))
     
-        # Iniciar servidor web para Render
-    start_server_thread()
     
+    # Iniciar servidor web dummy en segundo plano para Render
+    start_server_thread()
+
     logger.info("🚀 Bot iniciado correctamente!")
     application.run_polling()
 
