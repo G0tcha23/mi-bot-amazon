@@ -26,7 +26,7 @@ GRUPOS_CONFIG = {
 }
 
 # Estados de la conversación
-ESPERANDO_ASIN, ESPERANDO_TIPO_ENLACE, ESPERANDO_KEYWORD, SELECCIONANDO_GRUPOS, POST_PUBLICACION = range(5)
+ESPERANDO_ASIN, SELECCIONANDO_OFERTA, ESPERANDO_TEXTO_EUROS, SELECCIONANDO_REVIEW, SELECCIONANDO_TIPO_ENLACE, ESPERANDO_KEYWORD, SELECCIONANDO_GRUPOS, POST_PUBLICACION = range(8)
 
 # Datos temporales del usuario
 user_data_storage = {}
@@ -270,12 +270,10 @@ async def recibir_asin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def mostrar_producto_encontrado(update, context, datos, is_callback=False):
     """Muestra el producto y los botones de oferta (función auxiliar)"""
     keyboard = [
-        [InlineKeyboardButton("💰 Reembolso Completo", callback_data="oferta_completo")],
-        [InlineKeyboardButton("💵 Reembolso Parcial", callback_data="oferta_parcial")],
-        [InlineKeyboardButton("1️⃣ Rango Precio 1", callback_data="oferta_rango_1")],
-        [InlineKeyboardButton("2️⃣ Rango Precio 2", callback_data="oferta_rango_2")],
-        [InlineKeyboardButton("3️⃣ Rango Precio 3", callback_data="oferta_rango_3")],
-        [InlineKeyboardButton("📋 Consultar Condiciones", callback_data="oferta_consultar")],
+        [InlineKeyboardButton("💰 Reembolso completo", callback_data="oferta_completo")],
+        [InlineKeyboardButton("💵 Reembolso parcial", callback_data="oferta_parcial")],
+        [InlineKeyboardButton("💶 Euros (Personalizado)", callback_data="oferta_euros")],
+        [InlineKeyboardButton("📋 Consultar condiciones", callback_data="oferta_consultar")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -306,35 +304,65 @@ async def mostrar_producto_encontrado(update, context, datos, is_callback=False)
         # Fallback si falla por foto o formato
         await target.reply_text(f"**{titulo_safe}**\n\n(Error cargando imagen/descripción completa)\n\nSelecciona oferta:", parse_mode='Markdown', reply_markup=reply_markup)
             
-    return ESPERANDO_TIPO_ENLACE
+    return SELECCIONANDO_OFERTA
 
 async def seleccionar_oferta(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
+    tipo = query.data.replace("oferta_", "")
     user_id = update.effective_user.id
+    
+    if tipo == "euros":
+        await query.message.reply_text("✍️ Escribe el texto de la oferta (ej: Menos 10€):")
+        return ESPERANDO_TEXTO_EUROS
+        
     if user_id in user_data_storage:
-        tipo = query.data.replace("oferta_", "")
         user_data_storage[user_id]['tipo_oferta'] = tipo
         
-        # Feedback visual simple
-        ofertas = {
-            "completo": "Reembolso Completo",
-            "parcial": "Reembolso Parcial",
-            "consultar": "Consultar Condiciones",
-            "rango_1": "Rango Precio 1",
-            "rango_2": "Rango Precio 2",
-            "rango_3": "Rango Precio 3"
-        }
-        await query.message.reply_text(f"✅ Seleccionado: {ofertas.get(tipo, tipo)}")
+    return await preguntar_review(update, context)
 
-    # Botones enlace
+async def recibir_texto_euros(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    texto = update.message.text.strip()
+    user_id = update.effective_user.id
+    
+    if user_id in user_data_storage:
+        user_data_storage[user_id]['tipo_oferta'] = 'euros'
+        user_data_storage[user_id]['texto_personalizado'] = texto
+        
+    return await preguntar_review(update, context)
+
+async def preguntar_review(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        [InlineKeyboardButton("⭐️ Rating + 5 Estrellas", callback_data="review_rating")],
+        [InlineKeyboardButton("🔥 Solo Compra", callback_data="review_compra")],
+        [InlineKeyboardButton("📝 Solo Texto", callback_data="review_texto")],
+        [InlineKeyboardButton("📷 Foto", callback_data="review_foto")],
+        [InlineKeyboardButton("📹 Video", callback_data="review_video")],
+        [InlineKeyboardButton("📷📹 Foto y Video", callback_data="review_fotovideo")],
+    ]
+    
+    target = update.message if update.message else update.callback_query.message
+    await target.reply_text("📝 **Selecciona el tipo de Review:**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+    return SELECCIONANDO_REVIEW
+
+async def seleccionar_review(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    review_type = query.data.replace("review_", "")
+    user_id = update.effective_user.id
+    
+    if user_id in user_data_storage:
+        user_data_storage[user_id]['tipo_review'] = review_type
+        
+    # Ask for link type
     keyboard = [
         [InlineKeyboardButton("🔗 Enlace Simple", callback_data="enlace_simple")],
         [InlineKeyboardButton("🔍 Enlace con Keywords", callback_data="enlace_keywords")],
     ]
     await query.message.reply_text("¿Qué tipo de enlace?", reply_markup=InlineKeyboardMarkup(keyboard))
-    return ESPERANDO_TIPO_ENLACE
+    return SELECCIONANDO_TIPO_ENLACE
 
 async def seleccionar_tipo_enlace(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -397,24 +425,35 @@ async def publicar_en_grupos(update: Update, context: ContextTypes.DEFAULT_TYPE)
     targets = list(GRUPOS_CONFIG.keys()) if query.data == "grupo_todos" else [int(query.data.replace("grupo_", ""))]
     
     # --- CONSTRUCCIÓN DEL MENSAJE FINAL ---
-    oferta_map = {
-        "completo": "💰 Reembolso Completo",
-        "parcial": "💵 Reembolso Parcial",
-        "consultar": "📋 Consultar Condiciones",
-        "rango_1": "1️⃣ Rango Precio 1",
-        "rango_2": "2️⃣ Rango Precio 2",
-        "rango_3": "3️⃣ Rango Precio 3"
-    }
-    texto_oferta = oferta_map.get(datos.get('tipo_oferta'), "📋 Consultar Condiciones")
+    tipo_oferta = datos.get('tipo_oferta')
+    if tipo_oferta == 'euros':
+        texto_oferta = f"💶 {datos.get('texto_personalizado', 'Oferta Especial')}"
+    else:
+        oferta_map = {
+            "completo": "💰 Reembolso completo",
+            "parcial": "💵 Reembolso parcial",
+            "consultar": "📋 Consultar condiciones"
+        }
+        texto_oferta = oferta_map.get(tipo_oferta, "📋 Consultar condiciones")
     
-    # SIN DESCRIPCIÓN Y SIN PREFIJO "OFERTA SELECCIONADA"
-    # Recortar título también para seguridad en publicación
+    review_map = {
+        "rating": "⭐️ Rating 5 Estrellas",
+        "compra": "🔥 Solo Compra",
+        "texto": "📝 Solo Texto",
+        "foto": "📷 Foto",
+        "video": "📹 Video",
+        "fotovideo": "📷📹 Foto y Video"
+    }
+    texto_review = review_map.get(datos.get('tipo_review'), "")
+    
+    # Recortar título para seguridad en publicación
     titulo_pub = datos['titulo']
     if len(titulo_pub) > 800: titulo_pub = titulo_pub[:800] + "..."
 
     mensaje_publicacion = (
         f"**{titulo_pub}**\n\n"
-        f"**{texto_oferta}**\n\n"
+        f"**{texto_oferta}**\n"
+        f"**{texto_review}**\n\n"
         f"**Contacto:** @R0cksta"
     )
     
@@ -483,10 +522,10 @@ def main():
             CommandHandler('historial', historial_command),
   
             ],
-            ESPERANDO_TIPO_ENLACE: [
-                CallbackQueryHandler(seleccionar_oferta, pattern='^oferta_'),
-                CallbackQueryHandler(seleccionar_tipo_enlace, pattern='^enlace_')
-            ],
+            SELECCIONANDO_OFERTA: [CallbackQueryHandler(seleccionar_oferta, pattern='^oferta_')],
+            ESPERANDO_TEXTO_EUROS: [MessageHandler(filters.TEXT & ~filters.COMMAND, recibir_texto_euros)],
+            SELECCIONANDO_REVIEW: [CallbackQueryHandler(seleccionar_review, pattern='^review_')],
+            SELECCIONANDO_TIPO_ENLACE: [CallbackQueryHandler(seleccionar_tipo_enlace, pattern='^enlace_')],
             ESPERANDO_KEYWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, recibir_keyword)],
             SELECCIONANDO_GRUPOS: [CallbackQueryHandler(publicar_en_grupos, pattern='^grupo_')],
             POST_PUBLICACION: [CallbackQueryHandler(post_publicacion_handler, pattern='^post_')]
