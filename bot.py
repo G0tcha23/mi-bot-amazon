@@ -7,7 +7,10 @@ import urllib.parse
 import random
 import json
 import os
-
+import threading
+import http.server
+import socketserver
+import os
 
 # Configuración de logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -47,6 +50,29 @@ def get_headers():
     }
 
 
+
+# --- SERVIDOR WEB DUMMY PARA RENDER ---
+def run_dummy_server():
+    """Ejecuta un servidor web simple para engañar a Render y que no cierre el bot"""
+    PORT = int(os.environ.get("PORT", 8080))
+    Handler = http.server.SimpleHTTPRequestHandler
+    
+    # Clase personalizada para responder 200 OK a todo (Health Check)
+    class HealthCheckHandler(Handler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header('Content-type', 'text/html')
+            self.end_headers()
+            self.wfile.write(b"Bot is alive!")
+
+    with socketserver.TCPServer(("", PORT), HealthCheckHandler) as httpd:
+        logger.info(f"🌍 Dummy server corriendo en puerto {PORT}")
+        httpd.serve_forever()
+
+def start_server_thread():
+    thread = threading.Thread(target=run_dummy_server)
+    thread.daemon = True
+    thread.start()
 
 
 
@@ -467,7 +493,8 @@ def main():
     application.add_handler(conv_handler)
     application.add_handler(CommandHandler('grupoid', obtener_id_grupo))
     
-    
+        # Iniciar servidor web para Render
+    start_server_thread()
     
     logger.info("🚀 Bot iniciado correctamente!")
     application.run_polling()
