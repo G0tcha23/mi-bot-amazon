@@ -5,7 +5,6 @@ import requests
 from bs4 import BeautifulSoup
 import urllib.parse
 import random
-import json
 import os
 import threading
 import http.server
@@ -17,8 +16,8 @@ from io import BytesIO
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Token
-TOKEN = "5542545245:AAETXpqyI9htrp760FqZ1TmI7N0A4zKhY1I"
+# Token - AHORA DESDE VARIABLE DE ENTORNO (más seguro)
+TOKEN = os.environ.get("TELEGRAM_TOKEN", "5542545245:AAETXpqyI9htrp760FqZ1TmI7N0A4zKhY1I")
 
 # Public Groups
 GRUPOS_CONFIG = {
@@ -50,15 +49,25 @@ def get_headers():
         'Referer': 'https://www.amazon.es/'
     }
 
-# Dummy Server
+# Dummy Server - MODIFICADO PARA RAILWAY
 def run_dummy_server():
     PORT = int(os.environ.get("PORT", 8080))
     Handler = http.server.SimpleHTTPRequestHandler
+    
     class HealthCheckHandler(Handler):
         def do_GET(self):
             self.send_response(200)
-            self.wfile.write(b"Bot is alive!")
-    with socketserver.TCPServer(("", PORT), HealthCheckHandler) as httpd:
+            self.send_header('Content-type', 'text/plain')
+            self.end_headers()
+            self.wfile.write(b"Rockstar Bot is alive!")
+        
+        def log_message(self, format, *args):
+            # Suprimir logs del servidor HTTP para no saturar
+            pass
+    
+    # CAMBIO CRÍTICO: 0.0.0.0 para que Railway pueda acceder
+    with socketserver.TCPServer(("0.0.0.0", PORT), HealthCheckHandler) as httpd:
+        logger.info(f"✅ Servidor HTTP corriendo en puerto {PORT}")
         httpd.serve_forever()
 
 def start_server_thread():
@@ -322,6 +331,11 @@ async def publicar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.edit_text("❌ Cancelado")
         return ConversationHandler.END
         
+    # NUEVA OPCIÓN: Republicar
+    if query.data == "republicar":
+        await query.message.edit_text("🔄 Republicando producto...")
+        return await preguntar_grupos(update, context)
+    
     uid = update.effective_user.id
     datos = user_data_storage.get(uid)
     
@@ -369,10 +383,16 @@ async def publicar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.error(f"Error enviando a {chat_id}: {e}")
 
-    await query.message.reply_text(f"✅ Publicado en {count} grupos públicos + Archivo.")
-    return ConversationHandler.END
+    # BOTÓN PARA REPUBLICAR
+    keyboard = [[InlineKeyboardButton("🔄 Publicar de Nuevo", callback_data="republicar")]]
+    await query.message.reply_text(
+        f"✅ Publicado en {count} grupos públicos + Archivo.",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    return SELECCIONANDO_GRUPOS
 
 def main():
+    logger.info("🚀 Iniciando Rockstar Bot...")
     application = Application.builder().token(TOKEN).build()
     
     conv = ConversationHandler(
@@ -391,6 +411,7 @@ def main():
     
     application.add_handler(conv)
     start_server_thread()
+    logger.info("✅ Bot iniciado correctamente")
     application.run_polling()
 
 if __name__ == '__main__':
