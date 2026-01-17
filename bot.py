@@ -1,10 +1,11 @@
 import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters, ConversationHandler
 import requests
 from bs4 import BeautifulSoup
 import urllib.parse
 import random
+import json
 import os
 import threading
 import http.server
@@ -16,8 +17,8 @@ from io import BytesIO
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Token - AHORA DESDE VARIABLE DE ENTORNO (más seguro)
-TOKEN = os.environ.get("TELEGRAM_TOKEN", "5542545245:AAETXpqyI9htrp760FqZ1TmI7N0A4zKhY1I")
+# Token
+TOKEN = "5542545245:AAETXpqyI9htrp760FqZ1TmI7N0A4zKhY1I"
 
 # Public Groups
 GRUPOS_CONFIG = {
@@ -49,25 +50,15 @@ def get_headers():
         'Referer': 'https://www.amazon.es/'
     }
 
-# Dummy Server - MODIFICADO PARA RAILWAY
+# Dummy Server
 def run_dummy_server():
     PORT = int(os.environ.get("PORT", 8080))
     Handler = http.server.SimpleHTTPRequestHandler
-    
     class HealthCheckHandler(Handler):
         def do_GET(self):
             self.send_response(200)
-            self.send_header('Content-type', 'text/plain')
-            self.end_headers()
-            self.wfile.write(b"Rockstar Bot is alive!")
-        
-        def log_message(self, format, *args):
-            # Suprimir logs del servidor HTTP para no saturar
-            pass
-    
-    # CAMBIO CRÍTICO: 0.0.0.0 para que Railway pueda acceder
-    with socketserver.TCPServer(("0.0.0.0", PORT), HealthCheckHandler) as httpd:
-        logger.info(f"✅ Servidor HTTP corriendo en puerto {PORT}")
+            self.wfile.write(b"Bot is alive!")
+    with socketserver.TCPServer(("", PORT), HealthCheckHandler) as httpd:
         httpd.serve_forever()
 
 def start_server_thread():
@@ -79,14 +70,12 @@ def agregar_marca_agua(url_imagen_producto):
         response = requests.get(url_imagen_producto, headers=get_headers(), timeout=10)
         img_producto = Image.open(BytesIO(response.content)).convert("RGBA")
         
-        # LOGO ROCKSTAR OFICIAL (AMARILLO/NEGRO) - FUENTE FIABLE DE WIKIPEDIA
         url_logo = "https://upload.wikimedia.org/wikipedia/commons/thumb/5/53/Rockstar_Games_Logo.svg/512px-Rockstar_Games_Logo.svg.png"
         
         try:
             response_logo = requests.get(url_logo, headers=get_headers(), timeout=10)
             img_logo = Image.open(BytesIO(response_logo.content)).convert("RGBA")
             
-            # Redimensionado al 12% del ancho de la imagen (Pequeño y elegante)
             ancho_base = int(img_producto.width * 0.12)
             w_percent = (ancho_base / float(img_logo.size[0]))
             h_size = int((float(img_logo.size[1]) * float(w_percent)))
@@ -105,7 +94,6 @@ def agregar_marca_agua(url_imagen_producto):
             return output
         except Exception as e:
             logger.error(f"Error descargando logo: {e}")
-            # Si falla el logo, devolvemos la imagen original para no parar el bot
             output = BytesIO()
             img_producto = img_producto.convert("RGB")
             img_producto.save(output, format="JPEG", quality=95)
@@ -143,10 +131,127 @@ def obtener_datos_amazon(asin_raw):
             except: pass
     return None
 
-# Handlers
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 **Rockstar Bot**\nEnvíame ASIN/Link.", parse_mode='Markdown')
+# ==================== NUEVOS COMANDOS ====================
+
+async def menu_principal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Muestra el menú principal con botones"""
+    keyboard = [
+        [InlineKeyboardButton("📦 Nueva Publicación", callback_data="menu_nueva")],
+        [InlineKeyboardButton("📊 Estado del Bot", callback_data="menu_status")],
+        [InlineKeyboardButton("ℹ️ Ayuda", callback_data="menu_ayuda")]
+    ]
+    
+    mensaje = (
+        "🎮 **ROCKSTAR BOT - MENÚ PRINCIPAL**\n\n"
+        "Selecciona una opción:"
+    )
+    
+    if update.callback_query:
+        await update.callback_query.message.edit_text(mensaje, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+    else:
+        await update.message.reply_text(mensaje, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+    
     return ESPERANDO_ASIN
+
+async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Maneja los callbacks del menú"""
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data == "menu_nueva":
+        await query.message.edit_text("📦 **Envíame el ASIN o enlace de Amazon:**", parse_mode='Markdown')
+        return ESPERANDO_ASIN
+    
+    elif query.data == "menu_status":
+        mensaje = (
+            "📊 **ESTADO DEL BOT**\n\n"
+            "✅ Bot activo y funcionando\n"
+            f"👥 Grupos configurados: {len(GRUPOS_CONFIG)}\n"
+            f"📁 Canales de archivo: 2\n\n"
+            "**Grupos activos:**\n"
+        )
+        for gid, nombre in GRUPOS_CONFIG.items():
+            mensaje += f"• {nombre}\n"
+        
+        keyboard = [[InlineKeyboardButton("« Volver al Menú", callback_data="menu_volver")]]
+        await query.message.edit_text(mensaje, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+        return ESPERANDO_ASIN
+    
+    elif query.data == "menu_ayuda":
+        mensaje = (
+            "ℹ️ **AYUDA - ROCKSTAR BOT**\n\n"
+            "**Comandos disponibles:**\n"
+            "• `/start` - Menú principal\n"
+            "• `/nueva` - Nueva publicación\n"
+            "• `/status` - Ver estado del bot\n"
+            "• `/ayuda` - Mostrar esta ayuda\n"
+            "• `/cancel` - Cancelar operación\n\n"
+            "**Cómo usar:**\n"
+            "1. Envía un ASIN o enlace de Amazon\n"
+            "2. Selecciona tipo de review\n"
+            "3. Elige la oferta\n"
+            "4. Configura el enlace\n"
+            "5. Selecciona grupos para publicar\n\n"
+            "**Contacto:** @R0cksta"
+        )
+        keyboard = [[InlineKeyboardButton("« Volver al Menú", callback_data="menu_volver")]]
+        await query.message.edit_text(mensaje, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+        return ESPERANDO_ASIN
+    
+    elif query.data == "menu_volver":
+        return await menu_principal(update, context)
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando /start - Muestra el menú principal"""
+    return await menu_principal(update, context)
+
+async def cmd_nueva(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando /nueva - Inicia nueva publicación"""
+    await update.message.reply_text("📦 **Envíame el ASIN o enlace de Amazon:**", parse_mode='Markdown')
+    return ESPERANDO_ASIN
+
+async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando /status - Muestra estado del bot"""
+    mensaje = (
+        "📊 **ESTADO DEL BOT**\n\n"
+        "✅ Bot activo y funcionando\n"
+        f"👥 Grupos configurados: {len(GRUPOS_CONFIG)}\n"
+        f"📁 Canales de archivo: 2\n\n"
+        "**Grupos activos:**\n"
+    )
+    for gid, nombre in GRUPOS_CONFIG.items():
+        mensaje += f"• {nombre}\n"
+    
+    await update.message.reply_text(mensaje, parse_mode='Markdown')
+    return ESPERANDO_ASIN
+
+async def cmd_ayuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando /ayuda - Muestra ayuda"""
+    mensaje = (
+        "ℹ️ **AYUDA - ROCKSTAR BOT**\n\n"
+        "**Comandos disponibles:**\n"
+        "• `/start` - Menú principal\n"
+        "• `/nueva` - Nueva publicación\n"
+        "• `/status` - Ver estado del bot\n"
+        "• `/ayuda` - Mostrar esta ayuda\n"
+        "• `/cancel` - Cancelar operación\n\n"
+        "**Cómo usar:**\n"
+        "1. Envía un ASIN o enlace de Amazon\n"
+        "2. Selecciona tipo de review\n"
+        "3. Elige la oferta\n"
+        "4. Configura el enlace\n"
+        "5. Selecciona grupos para publicar\n\n"
+        "**Contacto:** @R0cksta"
+    )
+    await update.message.reply_text(mensaje, parse_mode='Markdown')
+    return ESPERANDO_ASIN
+
+async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando /cancel - Cancela la operación actual"""
+    await update.message.reply_text("❌ Operación cancelada.")
+    return await menu_principal(update, context)
+
+# ==================== HANDLERS ORIGINALES ====================
 
 async def recibir_asin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     asin = update.message.text
@@ -157,11 +262,10 @@ async def recibir_asin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if not datos:
         await update.message.reply_text("❌ No encontrado.")
-        return ConversationHandler.END
+        return await menu_principal(update, context)
         
     user_data_storage[update.effective_user.id] = datos
     
-    # ASK REVIEW FIRST
     keyboard = [
         [InlineKeyboardButton("⭐️ Rating +5 Estrellas", callback_data="rev_rating")],
         [InlineKeyboardButton("🔥 Solo Compra", callback_data="rev_compra")],
@@ -190,7 +294,6 @@ async def seleccionar_review(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if uid in user_data_storage:
         user_data_storage[uid]['review'] = mapa_reviews.get(query.data, "Review")
         
-    # ASK OFFER SECOND
     keyboard = [
         [InlineKeyboardButton("Reembolso completo", callback_data="off_completo")],
         [InlineKeyboardButton("Reembolso parcial", callback_data="off_parcial")],
@@ -263,7 +366,6 @@ async def finalizar_enlace(update, context, link):
     user_data_storage[uid]['enlace'] = link
     datos = user_data_storage[uid]
     
-    # 1. SEND LINK TO USER (AND ARCHIVE)
     msg_user = f"🔗 **Enlace Generado:**\n{link}"
     if update.callback_query:
         await update.callback_query.message.reply_text(msg_user)
@@ -276,7 +378,6 @@ async def finalizar_enlace(update, context, link):
     except Exception as e:
         logger.error(f"Error archivo enlaces: {e}")
         
-    # 2. GENERATE PREVIEW (ALWAYS)
     status_msg = await context.bot.send_message(chat_id=update.effective_chat.id, text="🎨 Generando Vista Previa con Logo...")
     
     titulo = datos['titulo']
@@ -295,7 +396,6 @@ async def finalizar_enlace(update, context, link):
     if datos['imagen_url']:
         img_data = agregar_marca_agua(datos['imagen_url'])
         
-    # Send Preview
     try:
         await status_msg.delete()
         if img_data:
@@ -309,7 +409,6 @@ async def finalizar_enlace(update, context, link):
         logger.error(f"Error enviando preview: {e}")
         await context.bot.send_message(chat_id=update.effective_chat.id, text="⚠️ Error generando vista previa de imagen, pero la publicación funciona.")
 
-    # 3. ASK GROUPS
     return await preguntar_grupos(update, context)
 
 async def preguntar_grupos(update, context):
@@ -319,7 +418,6 @@ async def preguntar_grupos(update, context):
     keyboard.append([InlineKeyboardButton("✅ TODOS", callback_data="g_todos")])
     keyboard.append([InlineKeyboardButton("❌ Cancelar", callback_data="cancel")])
     
-    # We send a new message because the previous one was the photo preview
     await context.bot.send_message(chat_id=update.effective_chat.id, text="📢 **¿Dónde publicar?**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
     return SELECCIONANDO_GRUPOS
 
@@ -329,26 +427,18 @@ async def publicar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if query.data == "cancel":
         await query.message.edit_text("❌ Cancelado")
-        return ConversationHandler.END
+        return await menu_principal(update, context)
         
-    # NUEVA OPCIÓN: Republicar
-    if query.data == "republicar":
-        await query.message.edit_text("🔄 Republicando producto...")
-        return await preguntar_grupos(update, context)
-    
     uid = update.effective_user.id
     datos = user_data_storage.get(uid)
     
-    # TARGETS
     if query.data == "g_todos":
         targets = list(GRUPOS_CONFIG.keys())
     else:
         targets = [int(query.data.replace("g_", ""))]
         
-    # ADD ARCHIVE PRODUCT CHANNEL ALWAYS
     targets.append(ARCHIVO_PRODUCTOS_ID)
     
-    # MESSAGE FORMAT (CARD)
     titulo = datos['titulo']
     if len(titulo) > 800: titulo = titulo[:800] + "..."
     
@@ -361,7 +451,6 @@ async def publicar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "**Contacto:** @R0cksta"
     )
     
-    # IMAGE PROCESSING
     await query.message.edit_text("🚀 Publicando...")
     
     img_data = None
@@ -372,7 +461,7 @@ async def publicar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for chat_id in targets:
         try:
             if img_data:
-                img_data.seek(0) # Reset pointer
+                img_data.seek(0)
                 await context.bot.send_photo(chat_id=chat_id, photo=img_data, caption=msg, parse_mode='Markdown')
             elif datos['imagen_url']:
                 await context.bot.send_photo(chat_id=chat_id, photo=datos['imagen_url'], caption=msg, parse_mode='Markdown')
@@ -383,22 +472,42 @@ async def publicar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.error(f"Error enviando a {chat_id}: {e}")
 
-    # BOTÓN PARA REPUBLICAR
-    keyboard = [[InlineKeyboardButton("🔄 Publicar de Nuevo", callback_data="republicar")]]
-    await query.message.reply_text(
-        f"✅ Publicado en {count} grupos públicos + Archivo.",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-    return SELECCIONANDO_GRUPOS
+    await query.message.reply_text(f"✅ Publicado en {count} grupos públicos + Archivo.")
+    return await menu_principal(update, context)
+
+# ==================== CONFIGURACIÓN DE COMANDOS ====================
+
+async def configurar_comandos(application):
+    """Configura el menú de comandos de Telegram"""
+    comandos = [
+        BotCommand("start", "🎮 Menú principal"),
+        BotCommand("nueva", "📦 Nueva publicación"),
+        BotCommand("status", "📊 Estado del bot"),
+        BotCommand("ayuda", "ℹ️ Ayuda y comandos"),
+        BotCommand("cancel", "❌ Cancelar operación")
+    ]
+    await application.bot.set_my_commands(comandos)
+    logger.info("✅ Comandos del bot configurados")
 
 def main():
-    logger.info("🚀 Iniciando Rockstar Bot...")
     application = Application.builder().token(TOKEN).build()
     
+    # Configurar comandos al iniciar
+    application.post_init = configurar_comandos
+    
     conv = ConversationHandler(
-        entry_points=[CommandHandler('start', start)],
+        entry_points=[
+            CommandHandler('start', start),
+            CommandHandler('nueva', cmd_nueva),
+            CommandHandler('status', cmd_status),
+            CommandHandler('ayuda', cmd_ayuda),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, recibir_asin)
+        ],
         states={
-            ESPERANDO_ASIN: [MessageHandler(filters.TEXT & ~filters.COMMAND, recibir_asin)],
+            ESPERANDO_ASIN: [
+                CallbackQueryHandler(menu_callback),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, recibir_asin)
+            ],
             SELECCIONANDO_REVIEW: [CallbackQueryHandler(seleccionar_review)],
             SELECCIONANDO_OFERTA: [CallbackQueryHandler(seleccionar_oferta)],
             ESPERANDO_TEXTO_EUROS: [MessageHandler(filters.TEXT & ~filters.COMMAND, recibir_texto_euros)],
@@ -406,13 +515,23 @@ def main():
             ESPERANDO_KEYWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, recibir_keyword)],
             SELECCIONANDO_GRUPOS: [CallbackQueryHandler(publicar)]
         },
-        fallbacks=[CommandHandler('cancel', start)]
+        fallbacks=[
+            CommandHandler('cancel', cmd_cancel),
+            CommandHandler('start', start)
+        ],
+        allow_reentry=True
     )
     
     application.add_handler(conv)
+    
+    logger.info("🚀 Iniciando Rockstar Bot...")
+    
     start_server_thread()
+    
     logger.info("✅ Bot iniciado correctamente")
-    application.run_polling()
+    logger.info("✅ Servidor HTTP corriendo en puerto 8080")
+    
+    application.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
     main()
