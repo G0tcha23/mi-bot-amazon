@@ -1,5 +1,5 @@
 import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters, ConversationHandler
 import requests
 from bs4 import BeautifulSoup
@@ -131,6 +131,16 @@ def obtener_datos_amazon(asin_raw):
             except: pass
     return None
 
+# ==================== TECLADO FÍSICO ====================
+
+def get_teclado_principal():
+    """Crea el teclado persistente con botones físicos"""
+    keyboard = [
+        [KeyboardButton("📦 Nueva Publicación")],
+        [KeyboardButton("📊 Estado"), KeyboardButton("ℹ️ Ayuda")]
+    ]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, persistent=True)
+
 # ==================== NUEVOS COMANDOS ====================
 
 async def menu_principal(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -202,8 +212,18 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await menu_principal(update, context)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Comando /start - Muestra el menú principal"""
-    return await menu_principal(update, context)
+    """Comando /start - Muestra el menú principal con teclado físico"""
+    mensaje = (
+        "🎮 **ROCKSTAR BOT**\n\n"
+        "Usa los botones de abajo o envía directamente un ASIN de Amazon.\n\n"
+        "**Contacto:** @R0cksta"
+    )
+    await update.message.reply_text(
+        mensaje, 
+        reply_markup=get_teclado_principal(),
+        parse_mode='Markdown'
+    )
+    return ESPERANDO_ASIN
 
 async def cmd_nueva(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Comando /nueva - Inicia nueva publicación"""
@@ -254,15 +274,50 @@ async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ==================== HANDLERS ORIGINALES ====================
 
 async def recibir_asin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    asin = update.message.text
+    texto = update.message.text
+    
+    # Manejar botones del teclado físico
+    if texto == "📦 Nueva Publicación":
+        await update.message.reply_text("📦 **Envíame el ASIN o enlace de Amazon:**", parse_mode='Markdown')
+        return ESPERANDO_ASIN
+    
+    elif texto == "📊 Estado":
+        mensaje = (
+            "📊 **ESTADO DEL BOT**\n\n"
+            "✅ Bot activo y funcionando\n"
+            f"👥 Grupos configurados: {len(GRUPOS_CONFIG)}\n"
+            f"📁 Canales de archivo: 2\n\n"
+            "**Grupos activos:**\n"
+        )
+        for gid, nombre in GRUPOS_CONFIG.items():
+            mensaje += f"• {nombre}\n"
+        await update.message.reply_text(mensaje, parse_mode='Markdown')
+        return ESPERANDO_ASIN
+    
+    elif texto == "ℹ️ Ayuda":
+        mensaje = (
+            "ℹ️ **AYUDA - ROCKSTAR BOT**\n\n"
+            "**Cómo usar:**\n"
+            "1. Pulsa '📦 Nueva Publicación' o envía un ASIN directamente\n"
+            "2. Selecciona tipo de review\n"
+            "3. Elige la oferta\n"
+            "4. Configura el enlace\n"
+            "5. Selecciona grupos para publicar\n\n"
+            "**Contacto:** @R0cksta"
+        )
+        await update.message.reply_text(mensaje, parse_mode='Markdown')
+        return ESPERANDO_ASIN
+    
+    # Si no es un botón, procesar como ASIN
+    asin = texto
     msg = await update.message.reply_text("🔍 Buscando...")
     datos = obtener_datos_amazon(asin)
     try: await msg.delete()
     except: pass
     
     if not datos:
-        await update.message.reply_text("❌ No encontrado.")
-        return await menu_principal(update, context)
+        await update.message.reply_text("❌ No encontrado. Envía un ASIN válido.")
+        return ESPERANDO_ASIN
         
     user_data_storage[update.effective_user.id] = datos
     
@@ -472,8 +527,8 @@ async def publicar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.error(f"Error enviando a {chat_id}: {e}")
 
-    await query.message.reply_text(f"✅ Publicado en {count} grupos públicos + Archivo.")
-    return await menu_principal(update, context)
+    await query.message.reply_text(f"✅ Publicado en {count} grupos públicos + Archivo.", reply_markup=get_teclado_principal())
+    return ESPERANDO_ASIN
 
 # ==================== CONFIGURACIÓN DE COMANDOS ====================
 
